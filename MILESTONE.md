@@ -1,7 +1,7 @@
 # Current Milestone: M1 — Infrastructure & Project Scaffold
 
 ## Goal
-Full Docker Compose stack (frontend, backend, db) is running with a passing health endpoint, validated DB schema, env var configuration, and CI-ready test harnesses for both frontend and backend.
+Full Docker Compose stack (frontend, backend, db) is running locally with a passing health check, DB schema applied, and CI-ready test harnesses for both frontend and backend.
 
 ## What this means for agents
 
