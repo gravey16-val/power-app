@@ -288,6 +288,15 @@ export default defineConfig({
 })
 ```
 
+### Deployment (Render)
+- `render.yaml` (repo root) is a Render Blueprint defining three resources:
+  - **weather-backend** — Python Web Service, `rootDir: backend`, build `pip install -r requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`, health check `GET /health`.
+  - **weather-frontend** — static site, `rootDir: frontend`, build `npm ci && npm run build`, publish `./dist`, with an SPA `/* → /index.html` rewrite.
+  - **weather-db** — managed PostgreSQL 16.
+- `DATABASE_URL` is injected into the backend via `fromDatabase` (the `weather-db` connection string) — never hardcoded.
+- `VITE_API_URL` is baked into the frontend build (`https://weather-backend.onrender.com`); Vite reads `VITE_*` at build time, so it must be a full `https://` URL.
+- Validate locally with the Render CLI (`render blueprint validate`) or any YAML linter. See `DECISIONS.md` for why `render.yaml` extends the ARCHITECTURE.md §Deployment template (`runtime:` key, `rootDir`, SPA rewrite).
+
 ### Git Conventions
 - Branch naming: `milestone/{number}-{short-description}` (e.g., `milestone/1-scaffold`)
 - Commit messages: imperative mood, e.g. `Add DELETE /api/cities/{id} endpoint`
