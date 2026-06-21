@@ -1,0 +1,41 @@
+# Render.com deployment blueprint.
+#
+# NOTE on free plans below: Render free Postgres instances are deleted after
+# 90 days of inactivity and have NO automated backups. For production, switch
+# `weather-db` (and the web services) to a paid plan with backups enabled.
+services:
+  - type: web
+    name: weather-backend
+    runtime: python
+    plan: free
+    # Upgrade pip first; requirements.txt should pin transitive deps (pip freeze)
+    # for reproducible, supply-chain-safe builds.
+    buildCommand: python -m pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    rootDir: backend
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: weather-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false  # set to the deployed frontend origin per environment
+
+  - type: web
+    name: weather-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      # Overridable per environment (staging/preview/prod). Do NOT hardcode a
+      # backend URL here — set it in the Render dashboard or per-environment.
+      - key: VITE_API_URL
+        sync: false
+
+databases:
+  - name: weather-db
+    databaseName: weatherdb
+    user: weather
+    plan: free  # see NOTE above — no backups, deleted after 90d inactivity

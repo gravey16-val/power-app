@@ -1,5 +1,18 @@
 # CLAUDE.md — Weather Dashboard: Real-time City Weather Tracker
 
+> **Implementation status (M1 — Infrastructure & Scaffold):**
+> Full Docker Compose stack scaffolded (`db`, `backend`, `frontend`). Backend
+> exposes `GET /health → {"status": "ok"}` with CORS configured for the frontend
+> origin and an injectable SQLAlchemy `get_db` dependency. The schema is created
+> on startup via `Base.metadata.create_all` (in a FastAPI `lifespan` hook).
+> Routers (`cities`, `weather`, `geocode`), the `City` model, and the frontend
+> feature components listed below are placeholders for later milestones.
+>
+> **Backend layout note:** application modules live at the `backend/` root
+> (`backend/main.py`, `backend/database.py`) per ARCHITECTURE.md — the container
+> `CMD` is `uvicorn main:app`. Backend env var `CORS_ORIGINS` (comma-separated,
+> default `http://localhost:5173`) controls allowed CORS origins.
+
 ## How to Run
 
 ### Start the Full Stack

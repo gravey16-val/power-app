@@ -141,6 +141,7 @@ CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
 | Variable       | Required | Default (dev)                                        | Description                              |
 |----------------|----------|------------------------------------------------------|------------------------------------------|
 | `DATABASE_URL` | ✅ Yes   | `postgresql://weather:weather@db:5432/weatherdb`     | PostgreSQL connection string             |
+| `CORS_ORIGINS` | No       | `http://localhost:5173`                              | Comma-separated list of allowed CORS origins (see DECISIONS.md) |
 | `PYTHONUNBUFFERED` | No   | `1`                                                  | Ensures logs flush immediately           |
 
 ### Frontend
