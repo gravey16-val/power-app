@@ -39,7 +39,6 @@
 ### `docker-compose.yml`
 
 ```yaml
-version: "3.9"
 services:
 
   db:
@@ -99,37 +98,46 @@ volumes:
 
 ### `backend/Dockerfile`
 ```dockerfile
+# Single-stage build (NO multi-stage). Runs as the non-root user `appuser`.
 FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN addgroup --system app && adduser --system --ingroup app app
+RUN groupadd --system appuser \
+ && useradd --system --gid appuser --no-create-home --shell /usr/sbin/nologin appuser
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+ && python -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN chown -R app:app /app
-USER app
+RUN chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
+# No --reload in production. DATABASE_URL is read from the environment at runtime.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ### `frontend/Dockerfile`
 ```dockerfile
+# Single-stage build (NO multi-stage). M1 scaffold has no committed lockfile yet,
+# so `npm install` is used in place of `npm ci` (see DECISIONS.md).
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json ./
+RUN npm install
 
 COPY . .
 
 EXPOSE 5173
-CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 ```
 
 ---
@@ -544,7 +552,7 @@ databases:
 ```
 
 ### Production Notes
-- Backend Dockerfile uses non-root user (`app`) — Render-compatible.
+- Backend Dockerfile uses non-root user (`appuser`) — Render-compatible.
 - No `--reload` flag in production CMD.
 - `DATABASE_URL` injected by Render from managed Postgres; never hardcoded.
 - Frontend built as static files via `npm run build` → served by Render's CDN.

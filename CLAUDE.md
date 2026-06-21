@@ -114,7 +114,7 @@ weather-dashboard/
 │       └── test_geocode.py     # Tests: valid query, short query 400, proxied results
 │
 └── frontend/
-    ├── Dockerfile              # Single-stage: node:20-alpine, vite --host
+    ├── Dockerfile              # Single-stage: node:20-alpine, npm run dev -- --host
     ├── package.json            # react, react-dom, axios, tailwindcss, vite,
     │                           #   vitest, @testing-library/react, @testing-library/user-event
     ├── package-lock.json
@@ -180,7 +180,7 @@ weather-dashboard/
 ### General
 - **Everything runs in Docker** — never install Python or Node on the host for runtime.
 - **Single-stage Dockerfiles only** — no multi-stage builds. Keep it simple.
-- **Non-root user in backend container** — required by Render; user `app` is created in Dockerfile.
+- **Non-root user in backend container** — required by Render; user `appuser` is created in the Dockerfile (`groupadd`/`useradd`) and the container runs as `appuser`.
 - **No `--reload` in production CMD** — only use `--reload` locally via `docker compose override` if needed.
 
 ### Backend (Python / FastAPI)

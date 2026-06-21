@@ -1,0 +1,8 @@
+/* M1 scaffold styles. Tailwind directives are wired up in the M3 frontend shell. */
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+}
