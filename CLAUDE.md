@@ -1,5 +1,36 @@
 # CLAUDE.md — Weather Dashboard: Real-time City Weather Tracker
 
+## Environment Configuration (.env)
+
+All runtime config is supplied via environment variables that Docker Compose
+loads from a gitignored `.env` file. `.env.example` is the committed, documented
+template.
+
+**One-step local setup:**
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+| Variable            | Service  | Notes                                                    |
+|---------------------|----------|----------------------------------------------------------|
+| `POSTGRES_USER/PASSWORD/DB` | db | Initialise the local Postgres container.            |
+| `DATABASE_URL`      | backend  | **Required, no fallback** — backend raises if unset.     |
+| `CORS_ORIGINS`      | backend  | Comma-separated origins; defaults to local frontend, never `"*"`. |
+| `VITE_API_URL`      | frontend | Backend base URL, baked in at build time.                |
+
+Conventions (see `DECISIONS.md`):
+- `database.py` reads `DATABASE_URL` from the env with **no hardcoded fallback** —
+  it fails fast with a clear error so misconfiguration is caught at startup.
+- CORS origins come from `CORS_ORIGINS`; wildcard `"*"` is never combined with
+  `allow_credentials=True`.
+- Backend CMD binds to `${PORT:-8000}` so the same image runs on Render.
+- Base images and Python deps are pinned for reproducible builds.
+- On startup the backend retries the schema-creation DB connection a bounded
+  number of times before failing fast, so the first-boot Postgres readiness race
+  doesn't turn into a `restart: unless-stopped` crash loop that blocks
+  `docker compose exec`. The db healthcheck also sets a `start_period`.
+
 ## How to Run
 
 ### Start the Full Stack

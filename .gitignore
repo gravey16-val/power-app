@@ -1,0 +1,24 @@
+# Environment files — never commit local/secret values.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+dist/
+*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
