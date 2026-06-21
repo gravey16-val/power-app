@@ -123,14 +123,26 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# VITE_API_URL is inlined into the bundle at build time, so it is a build ARG
+# (passed via Compose build.args / docker-bake.hcl) promoted to ENV for the dev
+# server. It is a public URL, not a secret.
+ARG VITE_API_URL=http://localhost:8000
+ENV VITE_API_URL=$VITE_API_URL
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
 
 EXPOSE 5173
-CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 ```
+
+### `docker-bake.hcl`
+`docker buildx bake` builds the same two images as `docker compose build` and is
+the canonical place to declare build args explicitly. The `frontend` target
+forwards the `VITE_API_URL` variable (default `http://localhost:8000`); the
+`backend` target declares no build args — its runtime secrets are never baked.
 
 ---
 
@@ -147,9 +159,12 @@ CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
 
 | Variable       | Required | Default (dev)          | Description                              |
 |----------------|----------|------------------------|------------------------------------------|
-| `VITE_API_URL` | ✅ Yes   | `http://localhost:8000` | Base URL of the FastAPI backend          |
+| `VITE_API_URL` | ✅ Yes   | `http://localhost:8000` | Base URL of the FastAPI backend. **Build-time** — passed as a Docker build ARG (Compose `build.args` / `docker-bake.hcl`) because Vite inlines it into the bundle. |
 
-> **Note:** All env vars are set in `docker-compose.yml` for local dev. For Render, they are set via the Render dashboard or `render.yaml`.
+> **Note:** All env vars come from the gitignored `.env` file (template:
+> `.env.example`), which `docker compose` loads automatically. `VITE_API_URL` is
+> additionally forwarded as a build arg so it reaches Vite at build time. For
+> Render, vars are set via the dashboard or `render.yaml`.
 
 ---
 

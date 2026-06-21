@@ -12,6 +12,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
+**Building with `docker buildx bake`** (alternative to Compose; same images):
+```bash
+cp .env.example .env
+docker buildx bake                                   # builds backend + frontend
+VITE_API_URL=https://api.example.com docker buildx bake frontend
+```
+Build-time config is declared in `docker-bake.hcl`. Only the frontend takes a
+build arg (`VITE_API_URL`, inlined into the bundle by Vite at build time). The
+backend takes **no** build args — its runtime secrets are injected at run time
+and are never baked into an image layer.
+
 | Variable            | Service  | Notes                                                    |
 |---------------------|----------|----------------------------------------------------------|
 | `POSTGRES_USER/PASSWORD/DB` | db | Initialise the local Postgres container.            |
@@ -25,6 +36,14 @@ Conventions (see `DECISIONS.md`):
 - CORS origins come from `CORS_ORIGINS`; wildcard `"*"` is never combined with
   `allow_credentials=True`.
 - Backend CMD binds to `${PORT:-8000}` so the same image runs on Render.
+- `VITE_API_URL` is a build-time value: the frontend Dockerfile declares it as an
+  `ARG` (default `http://localhost:8000`) and Compose passes it via `build.args`
+  (mirrored in `docker-bake.hcl`), so every build path supplies it the same way.
+- Build-time vs. run-time scoping: only the non-secret, public `VITE_API_URL` is
+  passed as a build arg. Backend secrets (`DATABASE_URL`, `CORS_ORIGINS`) are
+  run-time only, and every `.dockerignore` excludes `.env*` so no secret ever
+  enters the build context — while keeping the files the build needs
+  (`requirements.txt`, `package.json`, lockfile).
 - Base images and Python deps are pinned for reproducible builds.
 - On startup the backend retries the schema-creation DB connection a bounded
   number of times before failing fast, so the first-boot Postgres readiness race

@@ -44,6 +44,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # VITE_API_URL is baked into the bundle at build time, so it must be
+        # passed as a build arg (mirrors docker-bake.hcl). Kept in `environment`
+        # too so the dev server picks it up at runtime.
+        VITE_API_URL: ${VITE_API_URL}
     restart: unless-stopped
     environment:
       VITE_API_URL: ${VITE_API_URL}

@@ -48,3 +48,28 @@ describe('frontend Docker build config', () => {
     expect(entries).toContain('node_modules')
   })
 })
+
+// Build-time environment configuration (this ticket). VITE_API_URL is inlined
+// into the bundle by Vite at build time, so it must be a declared build ARG —
+// otherwise `docker build` / `docker buildx bake` cannot supply it and the
+// build silently falls back to a default.
+describe('frontend build-time env configuration', () => {
+  it('declares VITE_API_URL as a build ARG so bake/build can pass it', () => {
+    const lines = instructionLines(read('Dockerfile'))
+    const dockerfile = lines.join('\n')
+    // The ARG makes the value injectable via --build-arg / bake / compose args.
+    expect(dockerfile).toMatch(/ARG\s+VITE_API_URL/)
+    // Promoting it to ENV makes the same value reach the dev server at runtime.
+    expect(dockerfile).toMatch(/ENV\s+VITE_API_URL=\$VITE_API_URL/)
+  })
+
+  it('keeps secrets out of the build context but keeps required build files', () => {
+    const entries = dockerignoreEntries(read('.dockerignore'))
+    // .env must be excluded so local secrets are never baked into a layer...
+    expect(entries).toContain('.env')
+    // ...but the files the build genuinely needs must NOT be excluded.
+    for (const required of ['package.json', 'package-lock.json', 'Dockerfile']) {
+      expect(entries).not.toContain(required)
+    }
+  })
+})
