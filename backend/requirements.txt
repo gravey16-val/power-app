@@ -1,0 +1,14 @@
+# Pinned to exact versions for reproducible Docker/Render builds.
+# (Past review: avoid bare ">=" lower bounds — they let each build drift.)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+httpx==0.28.1
+pydantic==2.10.4
+python-dotenv==1.0.1
+
+# Test harness (installed in the same single stage as runtime deps).
+pytest==8.3.4
+pytest-cov==6.0.0
+pytest-mock==3.14.0

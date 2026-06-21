@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: weather-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Render injects $PORT and routes traffic to it — bind to it explicitly.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: weather-db
+          property: connectionString
+      # Locked-down CORS in production — set to the deployed frontend origin.
+      - key: CORS_ORIGINS
+        value: https://weather-frontend.onrender.com
+
+  - type: web
+    name: weather-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://weather-backend.onrender.com
+
+databases:
+  - name: weather-db
+    databaseName: weatherdb
+    user: weather
+    plan: free

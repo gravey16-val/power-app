@@ -1,5 +1,22 @@
 # CLAUDE.md — Weather Dashboard: Real-time City Weather Tracker
 
+## Implementation Status
+
+**Current milestone: M1 — Infrastructure & Project Scaffold.**
+
+What exists today:
+- `docker-compose.yml` orchestrates three services: `frontend` (5173), `backend` (8000), `db` (postgres:16-alpine, 5432). `backend` waits for `db` via `depends_on: { condition: service_healthy }`.
+- Single-stage Dockerfiles for backend (`python:3.12.8-slim`, non-root `app` user, `$PORT`-aware CMD) and frontend (`node:20.18-alpine`, Vite dev server).
+- Backend: `main.py` (app factory, env-driven CORS, lifespan `create_all`, `GET /health`), `database.py` (engine/session/Base, no hardcoded `DATABASE_URL` fallback), `models.py` (`cities` table). Cities/weather/geocode routers are **M2** and not yet implemented.
+- Frontend: minimal Vite + React + TS shell (`App.tsx`). Full sidebar/weather UI is M3.
+- Test harnesses wired and green: backend `tests/` (pytest), frontend `src/__tests__/` (Vitest).
+
+Key M1 conventions (see `DECISIONS.md` for rationale):
+- All config via env vars — `DATABASE_URL`, `CORS_ORIGINS` (backend), `VITE_API_URL` (frontend). No secrets in source.
+- Dependencies and base images are pinned to exact versions for reproducible builds.
+- **Frontend tests live in `frontend/src/__tests__/`** (this overrides the `src/tests/` path mentioned later in this doc — ticket-64 mandatory rule). Setup: `src/__tests__/setup.ts`.
+- **Frontend tests stub `VITE_API_URL` with `vi.stubEnv`** instead of assuming it is undefined. The compose `frontend` service sets `VITE_API_URL`, and Vite exposes `VITE_`-prefixed `process.env` vars on `import.meta.env`, so the value is present when vitest runs inside the container. `App.tsx` uses `import.meta.env.VITE_API_URL || 'not configured'` so an unset *or* empty value falls back to the sentinel.
+
 ## How to Run
 
 ### Start the Full Stack
