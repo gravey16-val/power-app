@@ -1,0 +1,21 @@
+# Keep the build context small and — crucially — prevent the host's
+# platform-specific node_modules (e.g. the per-arch @esbuild/* binaries the
+# lockfile pins) from being copied over the deps installed inside the image.
+# Copying a host node_modules at the `COPY . .` step was the cause of the
+# frontend build hanging/failing right after dependency install (ticket #83).
+node_modules
+
+# Build / tooling artifacts that should never enter the image.
+dist
+coverage
+.vite
+*.log
+npm-debug.log*
+
+# Never bake local secrets into the image.
+.env
+.env.*
+
+# VCS metadata is irrelevant to the runtime image.
+.git
+.gitignore

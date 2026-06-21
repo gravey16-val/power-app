@@ -127,6 +127,7 @@ weather-dashboard/
 │
 ├── backend/
 │   ├── Dockerfile              # Single-stage: python:3.12-slim, non-root user
+│   ├── .dockerignore           # Excludes __pycache__/.pytest_cache from COPY
 │   ├── requirements.txt        # fastapi, uvicorn, sqlalchemy, psycopg2-binary,
 │   │                           #   httpx, pydantic, pytest, pytest-cov, httpx (test client)
 │   ├── main.py                 # FastAPI app factory, CORS, router includes, DB init
@@ -145,10 +146,11 @@ weather-dashboard/
 │       └── test_geocode.py     # Tests: valid query, short query 400, proxied results
 │
 └── frontend/
-    ├── Dockerfile              # Single-stage: node:20-alpine, vite --host
+    ├── Dockerfile              # Single-stage: node:20-alpine, npm ci, vite --host
+    ├── .dockerignore           # Excludes node_modules/build artifacts from COPY
     ├── package.json            # react, react-dom, axios, tailwindcss, vite,
     │                           #   vitest, @testing-library/react, @testing-library/user-event
-    ├── package-lock.json
+    ├── package-lock.json       # Committed lockfile; install via `npm ci`
     ├── vite.config.ts          # Vite config: React plugin, test config (jsdom)
     ├── tailwind.config.ts      # Tailwind content paths
     ├── tsconfig.json           # TypeScript strict mode
@@ -213,6 +215,14 @@ weather-dashboard/
 - **Single-stage Dockerfiles only** — no multi-stage builds. Keep it simple.
 - **Non-root user in backend container** — required by Render; user `app` is created in Dockerfile.
 - **No `--reload` in production CMD** — only use `--reload` locally via `docker compose override` if needed.
+- **Every build context has a `.dockerignore`** — `frontend/.dockerignore` and
+  `backend/.dockerignore` exclude `node_modules` / Python caches so `COPY . .`
+  cannot copy host-built, platform-specific artifacts over the deps installed
+  in the image. (Copying a host `node_modules` was what hung the frontend build
+  — ticket #83.) Keep these in sync when adding new local-only artifacts.
+- **Frontend installs with `npm ci`** against the committed `package-lock.json`
+  for deterministic, reproducible builds — the Dockerfile copies both
+  `package.json` and `package-lock.json` before installing.
 
 ### Backend (Python / FastAPI)
 

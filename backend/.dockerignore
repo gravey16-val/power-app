@@ -1,0 +1,18 @@
+# Keep the build context small and deterministic. Excludes host-side Python
+# caches and local artifacts so they can't leak into the image at `COPY . .`
+# (the backend mirrors the frontend fix from ticket #83).
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+htmlcov
+.venv
+venv
+
+# Never bake local secrets into the image.
+.env
+.env.*
+
+# VCS metadata is irrelevant to the runtime image.
+.git
+.gitignore
