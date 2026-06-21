@@ -114,7 +114,7 @@ weather-dashboard/
 │       └── test_geocode.py     # Tests: valid query, short query 400, proxied results
 │
 └── frontend/
-    ├── Dockerfile              # Single-stage: node:20-alpine, vite --host
+    ├── Dockerfile              # Single-stage: node:20-slim, vite --host (see DECISIONS.md)
     ├── package.json            # react, react-dom, axios, tailwindcss, vite,
     │                           #   vitest, @testing-library/react, @testing-library/user-event
     ├── package-lock.json
