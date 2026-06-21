@@ -118,7 +118,8 @@ weather-dashboard/
     ├── package.json            # react, react-dom, axios, tailwindcss, vite,
     │                           #   vitest, @testing-library/react, @testing-library/user-event
     ├── package-lock.json
-    ├── vite.config.ts          # Vite config: React plugin, test config (jsdom)
+    ├── vite.config.ts          # Vite app config: React plugin + dev server
+    ├── vitest.config.ts        # Vitest config: merges vite.config.ts, adds jsdom test env
     ├── tailwind.config.ts      # Tailwind content paths
     ├── tsconfig.json           # TypeScript strict mode
     ├── index.html              # Vite HTML entry point
@@ -186,7 +187,7 @@ weather-dashboard/
 ### Backend (Python / FastAPI)
 
 #### File & Module Layout
-- `main.py` is the FastAPI app entry point. It calls `Base.metadata.create_all(engine)` on startup.
+- `main.py` is the FastAPI app entry point. It calls `Base.metadata.create_all(engine)` on startup via a `lifespan` handler (the supported replacement for the deprecated `@app.on_event("startup")`).
 - All routers live in `routers/` and are included in `main.py` with their prefix (`/api`).
 - `database.py` exposes: `engine`, `SessionLocal`, `Base`, and a `get_db()` dependency.
 - `schemas.py` uses Pydantic v2 (`model_config = ConfigDict(from_attributes=True)`).
@@ -243,7 +244,7 @@ pytest-mock>=3.14.0
 
 #### Testing Conventions
 - Test files colocated under `src/tests/` mirroring the component/hook structure.
-- `src/tests/setup.ts` is referenced in `vite.config.ts` under `test.setupFiles`.
+- `src/tests/setup.ts` is referenced in `vitest.config.ts` under `test.setupFiles` (registers `@testing-library/jest-dom` matchers).
 - All API calls are mocked using `vi.mock('../../api/cities')` etc. — no real HTTP in tests.
 - Use `@testing-library/user-event` for simulating user interactions (typing, clicking, right-clicking).
 - Use `vi.useFakeTimers()` for testing debounce in `useGeocode` and auto-refresh in `useAutoRefresh`.
@@ -273,19 +274,27 @@ pytest-mock>=3.14.0
 }
 ```
 
-#### `vite.config.ts` (test configuration)
-```typescript
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+#### Test configuration (`vitest.config.ts`)
+`vite.config.ts` holds the canonical app config (React plugin + dev server).
+`vitest.config.ts` merges it and layers the jsdom test environment on top, so the
+React plugin stays in sync without duplicating it:
 
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: 'jsdom',
-    setupFiles: ['./src/tests/setup.ts'],
-    globals: true,
-  },
-})
+```typescript
+// vitest.config.ts
+import { defineConfig, mergeConfig } from 'vitest/config'
+import viteConfig from './vite.config'
+
+export default mergeConfig(
+  viteConfig,
+  defineConfig({
+    test: {
+      environment: 'jsdom',
+      setupFiles: ['./src/tests/setup.ts'],
+      globals: true,
+      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    },
+  }),
+)
 ```
 
 ### Git Conventions
