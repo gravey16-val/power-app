@@ -1,5 +1,39 @@
 # CLAUDE.md — Weather Dashboard: Real-time City Weather Tracker
 
+## Current Implementation Status (Milestone M1 — Infrastructure & Scaffold)
+
+The Docker Compose stack (`db` + `backend` + `frontend`) is scaffolded and runnable.
+Implemented so far:
+
+- **Backend** (`backend/`, flat layout per ARCHITECTURE.md):
+  - `database.py` — SQLAlchemy `engine`, `SessionLocal`, `Base`, `get_db()` dependency. Reads `DATABASE_URL` (SQLite-aware for tests).
+  - `models.py` — **`City` ORM model** → `cities` table (this milestone's ticket).
+  - `schemas.py` — Pydantic v2 `CityBase` / `CityOut`.
+  - `main.py` — FastAPI app + CORS + `GET /health`. Tables created via
+    `Base.metadata.create_all()` in the **lifespan** startup hook (idempotent).
+  - `tests/` — `test_health.py`, `test_models.py` (schema/constraint/default coverage).
+- **Frontend** (`frontend/`) — minimal Vite + React + TS scaffold with one passing
+  Vitest test. Feature components/hooks land in later milestones.
+
+> The full target file tree below is the **plan**; not every file exists yet.
+> Routers (`cities`/`weather`/`geocode`) and frontend feature components are M2+.
+
+### DB Schema — `cities` table (implemented)
+
+| Column       | Postgres type              | SQLAlchemy                                  | Constraints                |
+|--------------|----------------------------|---------------------------------------------|----------------------------|
+| `id`         | `SERIAL`                   | `Integer, primary_key, autoincrement`       | PK                         |
+| `name`       | `VARCHAR(255)`             | `String(255)`                               | `NOT NULL`                 |
+| `country`    | `VARCHAR(100)`             | `String(100)`                               | `NOT NULL`                 |
+| `latitude`   | `DOUBLE PRECISION`         | `Float`                                     | `NOT NULL`                 |
+| `longitude`  | `DOUBLE PRECISION`         | `Float`                                     | `NOT NULL`                 |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | `DateTime(timezone=True), server_default=func.now()` | `NOT NULL`, defaults to now |
+
+Plus `UNIQUE(name, country)` (`uq_city_name_country`) to prevent duplicate cities.
+Schema creation is idempotent — `create_all` only creates missing tables.
+
+---
+
 ## How to Run
 
 ### Start the Full Stack
