@@ -6,10 +6,9 @@
 3. [Environment Variables](#environment-variables)
 4. [Database Schema](#database-schema)
 5. [API Endpoints](#api-endpoints)
-6. [External APIs](#external-apis)
-7. [Frontend Component Tree](#frontend-component-tree)
-8. [Data Flow](#data-flow)
-9. [Deployment (Render)](#deployment-render)
+6. [Frontend Component Tree](#frontend-component-tree)
+7. [Data Flow](#data-flow)
+8. [Deployment (Render)](#deployment-render)
 
 ---
 
@@ -17,21 +16,20 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     Browser Client                      │
-│          React 18 + TypeScript + Tailwind + Vite        │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTP (VITE_API_URL)
-┌────────────────────────▼────────────────────────────────┐
-│                   Backend Service                       │
-│           FastAPI (Python 3.12) + Uvicorn               │
-│                  Port 8000                              │
-└──────────┬──────────────────────────┬───────────────────┘
-           │ SQLAlchemy (DATABASE_URL) │ HTTP (Open-Meteo)
-┌──────────▼──────────┐  ┌────────────▼───────────────────┐
-│  PostgreSQL 16      │  │  Open-Meteo APIs (external)    │
-│  Port 5432          │  │  api.open-meteo.com            │
-│  "weather_db"       │  │  geocoding-api.open-meteo.com  │
-└─────────────────────┘  └────────────────────────────────┘
+│                    Docker Compose Network               │
+│                                                         │
+│  ┌──────────────┐    ┌──────────────┐   ┌───────────┐  │
+│  │   frontend   │───▶│   backend    │──▶│    db     │  │
+│  │  (React/Vite)│    │  (FastAPI)   │   │(Postgres) │  │
+│  │  Port: 5173  │    │  Port: 8000  │   │ Port:5432 │  │
+│  └──────────────┘    └──────┬───────┘   └───────────┘  │
+│                             │                           │
+│                    ┌────────▼────────┐                  │
+│                    │  Open-Meteo API │ (external)        │
+│                    │  - Weather      │                  │
+│                    │  - Geocoding    │                  │
+│                    └─────────────────┘                  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -40,40 +38,35 @@
 
 ### `docker-compose.yml`
 
-| Service    | Image / Build          | Internal Port | External Port | Depends On |
-|------------|------------------------|---------------|---------------|------------|
-| `db`       | `postgres:16-alpine`   | 5432          | 5432          | —          |
-| `backend`  | `./backend/Dockerfile` | 8000          | 8000          | `db`       |
-| `frontend` | `./frontend/Dockerfile`| 5173          | 5173          | `backend`  |
-
 ```yaml
-# docker-compose.yml (canonical definition)
 version: "3.9"
-
 services:
+
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: weather_db
-      POSTGRES_USER: weather_user
-      POSTGRES_PASSWORD: weather_pass
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: weather
+      POSTGRES_DB: weatherdb
     volumes:
       - pg_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U weather_user -d weather_db"]
+      test: ["CMD-SHELL", "pg_isready -U weather -d weatherdb"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://weather_user:weather_pass@db:5432/weather_db
-      ALLOWED_ORIGINS: "http://localhost:5173"
+      DATABASE_URL: postgresql://weather:weather@db:5432/weatherdb
+      PYTHONUNBUFFERED: "1"
     ports:
       - "8000:8000"
     depends_on:
@@ -81,10 +74,12 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      VITE_API_URL: "http://localhost:8000"
+      VITE_API_URL: http://localhost:8000
     ports:
       - "5173:5173"
     depends_on:
@@ -94,91 +89,116 @@ volumes:
   pg_data:
 ```
 
-### Backend Dockerfile (`./backend/Dockerfile`)
-- Base image: `python:3.12-slim`
-- Single-stage build
-- Runs as non-root user `appuser`
-- Installs dependencies from `requirements.txt`
-- CMD: `uvicorn app.main:app --host 0.0.0.0 --port 8000` (no `--reload` in production)
+### Service Definitions
 
-### Frontend Dockerfile (`./frontend/Dockerfile`)
-- Base image: `node:20-alpine`
-- Single-stage build
-- Installs dependencies, runs `vite` dev server (or `vite preview` for prod build)
-- Exposes port `5173`
+| Service    | Base Image              | Port | Role                                      |
+|------------|-------------------------|------|-------------------------------------------|
+| `db`       | `postgres:16-alpine`    | 5432 | PostgreSQL 16 — persists city list        |
+| `backend`  | `python:3.12-slim`      | 8000 | FastAPI + Uvicorn — API + weather proxy   |
+| `frontend` | `node:20-alpine`        | 5173 | React 18 + Vite dev server (dev) / nginx (prod) |
+
+### `backend/Dockerfile`
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN addgroup --system app && adduser --system --ingroup app app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN chown -R app:app /app
+USER app
+
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+### `frontend/Dockerfile`
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 5173
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
+```
 
 ---
 
 ## Environment Variables
 
 ### Backend
-| Variable          | Required | Default (dev)                                               | Description                         |
-|-------------------|----------|-------------------------------------------------------------|-------------------------------------|
-| `DATABASE_URL`    | ✅ Yes   | `postgresql://weather_user:weather_pass@db:5432/weather_db` | PostgreSQL connection string        |
-| `ALLOWED_ORIGINS` | ✅ Yes   | `http://localhost:5173`                                     | Comma-separated CORS allowed origins|
+
+| Variable       | Required | Default (dev)                                        | Description                              |
+|----------------|----------|------------------------------------------------------|------------------------------------------|
+| `DATABASE_URL` | ✅ Yes   | `postgresql://weather:weather@db:5432/weatherdb`     | PostgreSQL connection string             |
+| `PYTHONUNBUFFERED` | No   | `1`                                                  | Ensures logs flush immediately           |
 
 ### Frontend
-| Variable       | Required | Default (dev)            | Description                     |
-|----------------|----------|--------------------------|---------------------------------|
-| `VITE_API_URL` | ✅ Yes   | `http://localhost:8000`  | Base URL of the FastAPI backend |
 
-### Database (Docker Compose only)
-| Variable            | Value          |
-|---------------------|----------------|
-| `POSTGRES_DB`       | `weather_db`   |
-| `POSTGRES_USER`     | `weather_user` |
-| `POSTGRES_PASSWORD` | `weather_pass` |
+| Variable       | Required | Default (dev)          | Description                              |
+|----------------|----------|------------------------|------------------------------------------|
+| `VITE_API_URL` | ✅ Yes   | `http://localhost:8000` | Base URL of the FastAPI backend          |
+
+> **Note:** All env vars are set in `docker-compose.yml` for local dev. For Render, they are set via the Render dashboard or `render.yaml`.
 
 ---
 
 ## Database Schema
 
-### Table: `cities`
+### PostgreSQL 16 — Database: `weatherdb`
 
-```sql
-CREATE TABLE cities (
-    id          SERIAL          PRIMARY KEY,
-    name        VARCHAR(255)    NOT NULL,
-    country     VARCHAR(100)    NOT NULL,
-    latitude    DOUBLE PRECISION NOT NULL,
-    longitude   DOUBLE PRECISION NOT NULL,
-    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
-);
+#### Table: `cities`
 
--- Unique constraint to prevent duplicate cities
-CREATE UNIQUE INDEX uix_cities_name_country_lat_lon
-    ON cities (name, country, latitude, longitude);
-```
+| Column       | Type                        | Constraints                       | Description                             |
+|--------------|-----------------------------|-----------------------------------|-----------------------------------------|
+| `id`         | `SERIAL`                    | `PRIMARY KEY`                     | Auto-incrementing integer PK            |
+| `name`       | `VARCHAR(255)`              | `NOT NULL`                        | City name (e.g. "Paris")                |
+| `country`    | `VARCHAR(100)`              | `NOT NULL`                        | Country name (e.g. "France")            |
+| `latitude`   | `DOUBLE PRECISION`          | `NOT NULL`                        | Geographic latitude (-90 to 90)         |
+| `longitude`  | `DOUBLE PRECISION`          | `NOT NULL`                        | Geographic longitude (-180 to 180)      |
+| `created_at` | `TIMESTAMP WITH TIME ZONE`  | `NOT NULL, DEFAULT NOW()`         | UTC timestamp of when city was added    |
 
-### SQLAlchemy Model (`app/models.py`)
+**Unique constraint:** `UNIQUE(name, country)` — prevents duplicate city entries.
 
+#### SQLAlchemy Model (Python)
 ```python
 class City(Base):
     __tablename__ = "cities"
 
-    id         : Mapped[int]      # Integer, primary key, autoincrement
-    name       : Mapped[str]      # String(255), not null
-    country    : Mapped[str]      # String(100), not null
-    latitude   : Mapped[float]    # Double precision, not null
-    longitude  : Mapped[float]    # Double precision, not null
-    created_at : Mapped[datetime] # DateTime(timezone=True), server_default=now()
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    name       = Column(String(255), nullable=False)
+    country    = Column(String(100), nullable=False)
+    latitude   = Column(Float, nullable=False)
+    longitude  = Column(Float, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("name", "country", name="uq_city_name_country"),)
 ```
 
-> Schema is applied via `SQLAlchemy Base.metadata.create_all()` on startup (Milestone 1).
-> Alembic migrations are introduced in Milestone 2+.
+#### Migration Strategy
+- Tables are created via `Base.metadata.create_all(engine)` on backend startup (no Alembic for simplicity in Milestone 1).
+- In production, this is idempotent — existing tables are not dropped.
 
 ---
 
 ## API Endpoints
 
-### Base URL
-- Development: `http://localhost:8000`
-- Production: Set via `VITE_API_URL` / Render service URL
+All backend endpoints are prefixed with the FastAPI app root. CORS is enabled for all origins in development.
 
 ### `GET /health`
-Health check for load balancers and Render deploy checks.
+Health check for load balancer and Docker healthcheck.
 
-**Response `200 OK`**
+**Response `200 OK`:**
 ```json
 { "status": "ok" }
 ```
@@ -188,71 +208,69 @@ Health check for load balancers and Render deploy checks.
 ### `GET /api/cities`
 Returns all saved cities ordered by `created_at ASC`.
 
-**Response `200 OK`**
+**Response `200 OK`:**
 ```json
 [
   {
     "id": 1,
-    "name": "New York",
-    "country": "United States",
-    "latitude": 40.7128,
-    "longitude": -74.0060,
-    "created_at": "2024-01-15T12:00:00Z"
+    "name": "Paris",
+    "country": "France",
+    "latitude": 48.8566,
+    "longitude": 2.3522,
+    "created_at": "2024-01-15T10:30:00Z"
   }
 ]
 ```
 
-**Error responses:** none (returns empty array `[]` when no cities saved)
-
 ---
 
 ### `POST /api/cities`
-Adds a new city to the database. Silently ignores duplicates (returns existing record).
+Adds a new city. Silently ignores duplicates (returns existing record).
 
-**Request Body**
+**Request Body:**
 ```json
 {
-  "name": "London",
-  "country": "United Kingdom",
-  "latitude": 51.5074,
-  "longitude": -0.1278
+  "name": "Paris",
+  "country": "France",
+  "latitude": 48.8566,
+  "longitude": 2.3522
 }
 ```
 
-| Field       | Type   | Required | Description                          |
-|-------------|--------|----------|--------------------------------------|
-| `name`      | string | ✅       | City name                            |
-| `country`   | string | ✅       | Country name (full, e.g. "France")   |
-| `latitude`  | float  | ✅       | Decimal latitude  (-90 to 90)        |
-| `longitude` | float  | ✅       | Decimal longitude (-180 to 180)      |
-
-**Response `201 Created`** (or `200 OK` if duplicate)
+**Response `201 Created`:**
 ```json
 {
-  "id": 2,
-  "name": "London",
-  "country": "United Kingdom",
-  "latitude": 51.5074,
-  "longitude": -0.1278,
-  "created_at": "2024-01-15T12:05:00Z"
+  "id": 1,
+  "name": "Paris",
+  "country": "France",
+  "latitude": 48.8566,
+  "longitude": 2.3522,
+  "created_at": "2024-01-15T10:30:00Z"
 }
 ```
 
-**Error `422 Unprocessable Entity`** — missing or invalid fields (FastAPI default validation)
+**Response `200 OK`** (duplicate — city already exists, returns existing record):
+```json
+{
+  "id": 1,
+  "name": "Paris",
+  "country": "France",
+  "latitude": 48.8566,
+  "longitude": 2.3522,
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
 
 ---
 
 ### `DELETE /api/cities/{id}`
-Removes a city by its primary key.
+Removes a city by its integer ID.
 
-**Path Parameters**
-| Param | Type | Description     |
-|-------|------|-----------------|
-| `id`  | int  | City primary key|
+**Path Parameter:** `id` — integer, city primary key.
 
-**Response `204 No Content`** — success, empty body
+**Response `204 No Content`:** (empty body on success)
 
-**Error `404 Not Found`**
+**Response `404 Not Found`:**
 ```json
 { "detail": "City not found" }
 ```
@@ -260,73 +278,67 @@ Removes a city by its primary key.
 ---
 
 ### `GET /api/weather/{latitude}/{longitude}`
-Fetches current weather conditions from Open-Meteo for the given coordinates.
-Results are **not cached** (always fresh from Open-Meteo).
+Fetches current weather for the given coordinates from the Open-Meteo API. Acts as a backend proxy to avoid CORS issues and to enable future caching.
 
-**Path Parameters**
-| Param       | Type  | Description           |
-|-------------|-------|-----------------------|
-| `latitude`  | float | Decimal latitude      |
-| `longitude` | float | Decimal longitude     |
+**Path Parameters:**
+- `latitude` — float, e.g. `48.8566`
+- `longitude` — float, e.g. `2.3522`
 
-**Response `200 OK`**
+**Open-Meteo request (internal):**
+```
+GET https://api.open-meteo.com/v1/forecast
+  ?latitude={lat}
+  &longitude={lon}
+  &current=temperature_2m,relative_humidity_2m,apparent_temperature,
+            weather_code,wind_speed_10m
+  &wind_speed_unit=mph
+  &temperature_unit=celsius
+  &timezone=auto
+```
+
+**Response `200 OK`:**
 ```json
 {
   "temperature_c": 18.4,
   "temperature_f": 65.1,
-  "feels_like_c": 16.9,
-  "feels_like_f": 62.4,
+  "feels_like_c": 16.2,
+  "feels_like_f": 61.2,
   "humidity": 72,
-  "wind_speed_mph": 11.2,
-  "condition": "Partly Cloudy",
-  "condition_emoji": "🌤",
+  "wind_speed_mph": 8.3,
   "weather_code": 2,
-  "last_updated": "2024-01-15T12:00:00Z"
+  "weather_description": "Partly Cloudy",
+  "weather_emoji": "🌤",
+  "last_updated": "2024-01-15T10:45:00Z"
 }
 ```
 
-| Field             | Type   | Description                                   |
-|-------------------|--------|-----------------------------------------------|
-| `temperature_c`   | float  | Current temperature in Celsius                |
-| `temperature_f`   | float  | Current temperature in Fahrenheit             |
-| `feels_like_c`    | float  | Apparent temperature in Celsius               |
-| `feels_like_f`    | float  | Apparent temperature in Fahrenheit            |
-| `humidity`        | int    | Relative humidity percentage (0–100)          |
-| `wind_speed_mph`  | float  | Wind speed in miles per hour                  |
-| `condition`       | string | Human-readable weather condition              |
-| `condition_emoji` | string | Matching emoji for the condition              |
-| `weather_code`    | int    | Raw WMO weather interpretation code           |
-| `last_updated`    | string | ISO 8601 timestamp of the Open-Meteo reading  |
-
-**WMO Code → Condition + Emoji Mapping (backend)**
-| WMO Codes     | Condition        | Emoji |
-|---------------|-----------------|-------|
-| 0             | Clear Sky        | ☀️    |
-| 1             | Mainly Clear     | 🌤    |
-| 2             | Partly Cloudy    | ⛅    |
-| 3             | Overcast         | ☁️    |
-| 45, 48        | Foggy            | 🌫    |
-| 51–67         | Drizzle / Rain   | 🌧    |
-| 71–77         | Snow             | ❄️    |
-| 80–82         | Rain Showers     | 🌧    |
-| 95–99         | Thunderstorm     | ⛈    |
-
-**Error `502 Bad Gateway`** — Open-Meteo unreachable
+**Response `502 Bad Gateway`** (if Open-Meteo is unreachable):
 ```json
-{ "detail": "Failed to fetch weather data from Open-Meteo" }
+{ "detail": "Weather service unavailable" }
 ```
+
+#### WMO Weather Code → Emoji + Description Mapping (used internally)
+
+| Code Range | Description       | Emoji |
+|------------|-------------------|-------|
+| 0          | Clear Sky         | ☀️    |
+| 1          | Mainly Clear      | 🌤    |
+| 2          | Partly Cloudy     | ⛅    |
+| 3          | Overcast          | ☁️    |
+| 45, 48     | Fog               | 🌫    |
+| 51–67      | Drizzle / Rain    | 🌧    |
+| 71–77      | Snow              | ❄️    |
+| 80–82      | Rain Showers      | 🌧    |
+| 95–99      | Thunderstorm      | ⛈    |
 
 ---
 
 ### `GET /api/geocode?q={query}`
-Searches cities using Open-Meteo's Geocoding API. Returns up to 5 results.
+Proxies a search to the Open-Meteo Geocoding API. Returns up to 5 results.
 
-**Query Parameters**
-| Param | Type   | Required | Description                      |
-|-------|--------|----------|----------------------------------|
-| `q`   | string | ✅       | Search query (min 3 characters)  |
+**Query Parameter:** `q` — string, minimum 3 characters.
 
-**Response `200 OK`**
+**Response `200 OK`:**
 ```json
 [
   {
@@ -346,29 +358,15 @@ Searches cities using Open-Meteo's Geocoding API. Returns up to 5 results.
 ]
 ```
 
-**Error `400 Bad Request`** — query shorter than 3 characters
+**Response `400 Bad Request`** (query < 3 chars):
 ```json
 { "detail": "Query must be at least 3 characters" }
 ```
 
-**Error `502 Bad Gateway`** — Open-Meteo Geocoding unreachable
+**Response `502 Bad Gateway`** (if geocoding service unavailable):
 ```json
-{ "detail": "Failed to fetch geocoding data from Open-Meteo" }
+{ "detail": "Geocoding service unavailable" }
 ```
-
----
-
-## External APIs
-
-### Open-Meteo Weather
-- **URL:** `https://api.open-meteo.com/v1/forecast`
-- **No API key required**
-- **Params used:** `latitude`, `longitude`, `current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code`, `wind_speed_unit=mph`, `timezone=auto`
-
-### Open-Meteo Geocoding
-- **URL:** `https://geocoding-api.open-meteo.com/v1/search`
-- **No API key required**
-- **Params used:** `name={query}`, `count=5`, `language=en`, `format=json`
 
 ---
 
@@ -376,48 +374,50 @@ Searches cities using Open-Meteo's Geocoding API. Returns up to 5 results.
 
 ```
 src/
-├── main.tsx                          # React 18 createRoot entry point
-├── App.tsx                           # Root component — two-panel layout shell
+├── main.tsx                         # React 18 root, mounts <App />
+├── App.tsx                          # Root component — layout shell, global state
 │
 ├── components/
 │   ├── layout/
-│   │   ├── Sidebar.tsx               # Left panel wrapper (fixed width)
-│   │   └── MainContent.tsx           # Right panel wrapper (flex-grow)
+│   │   ├── Sidebar.tsx              # Left panel wrapper (w-64, fixed height)
+│   │   └── MainContent.tsx          # Right panel wrapper (flex-grow, scroll)
 │   │
 │   ├── sidebar/
-│   │   ├── CityTree.tsx              # Scrollable list of CityTreeItem components
-│   │   ├── CityTreeItem.tsx          # Single city row: flag, name, live temp; right-click menu
-│   │   ├── AddCityButton.tsx         # "＋ Add City" button that opens search
-│   │   ├── CitySearch.tsx            # Inline search bar with debounced input
-│   │   ├── CitySearchDropdown.tsx    # Dropdown list of up to 5 geocode results
-│   │   └── EmptyState.tsx            # "Add a city to get started" illustration
+│   │   ├── CityTree.tsx             # Scrollable city list container
+│   │   ├── CityTreeItem.tsx         # Single city row (flag, name, temp) + right-click
+│   │   ├── ContextMenu.tsx          # Floating right-click menu with Remove option
+│   │   ├── AddCityButton.tsx        # "＋ Add City" button
+│   │   ├── CitySearchInput.tsx      # Inline search input with debounce
+│   │   ├── CitySearchDropdown.tsx   # Autocomplete results list (max 5)
+│   │   └── EmptyState.tsx           # "Add a city to get started" message + arrow
 │   │
 │   ├── weather/
-│   │   ├── WeatherCardGrid.tsx       # Responsive CSS grid wrapper
-│   │   ├── WeatherCard.tsx           # Full weather card: all data fields + × button
-│   │   ├── WeatherCardSkeleton.tsx   # Loading placeholder matching card dimensions
-│   │   └── WeatherIcon.tsx           # Renders condition emoji (memoized)
+│   │   ├── WeatherCardGrid.tsx      # Responsive grid wrapper (3/2/1 cols)
+│   │   ├── WeatherCard.tsx          # Full weather card with all data fields
+│   │   ├── WeatherCardSkeleton.tsx  # Loading skeleton matching card dimensions
+│   │   └── WeatherIcon.tsx          # Renders emoji icon from weather_code
 │   │
 │   └── common/
-│       ├── ContextMenu.tsx           # Positioned right-click context menu portal
-│       └── ErrorBoundary.tsx         # React error boundary for card/sidebar failures
+│       └── ErrorBanner.tsx          # Inline error message component
 │
 ├── hooks/
-│   ├── useCities.ts                  # GET /api/cities — fetch + mutate city list
-│   ├── useAddCity.ts                 # POST /api/cities — optimistic add
-│   ├── useRemoveCity.ts              # DELETE /api/cities/{id} — optimistic remove
-│   ├── useWeather.ts                 # GET /api/weather/{lat}/{lon} — single city weather
-│   ├── useGeocode.ts                 # GET /api/geocode?q= — debounced search
-│   └── useAutoRefresh.ts             # 60-second interval trigger for weather re-fetch
+│   ├── useCities.ts                 # CRUD ops for city list (fetch, add, remove)
+│   ├── useWeather.ts                # Fetch weather for one city; manages loading state
+│   ├── useGeocode.ts                # Debounced geocoding search (300ms)
+│   └── useAutoRefresh.ts           # setInterval wrapper — triggers refetch every 60s
 │
 ├── api/
-│   └── client.ts                     # Axios (or fetch) base client — reads VITE_API_URL
+│   ├── client.ts                    # Axios instance with baseURL = VITE_API_URL
+│   ├── cities.ts                    # API calls: getCities, addCity, deleteCity
+│   ├── weather.ts                   # API call: getWeather(lat, lon)
+│   └── geocode.ts                   # API call: searchCities(query)
 │
 ├── types/
-│   └── index.ts                      # Shared TypeScript interfaces
+│   └── index.ts                     # Shared TypeScript interfaces:
+│                                    #   City, WeatherData, GeocodeResult
 │
 └── styles/
-    └── index.css                     # Tailwind CSS directives (@tailwind base/components/utilities)
+    └── index.css                    # Tailwind CSS directives (@tailwind base/components/utilities)
 ```
 
 ### Key TypeScript Interfaces (`src/types/index.ts`)
@@ -432,14 +432,6 @@ export interface City {
   created_at: string;
 }
 
-export interface GeocodingResult {
-  name: string;
-  country: string;
-  latitude: number;
-  longitude: number;
-  country_code: string;
-}
-
 export interface WeatherData {
   temperature_c: number;
   temperature_f: number;
@@ -447,19 +439,34 @@ export interface WeatherData {
   feels_like_f: number;
   humidity: number;
   wind_speed_mph: number;
-  condition: string;
-  condition_emoji: string;
   weather_code: number;
+  weather_description: string;
+  weather_emoji: string;
   last_updated: string;
 }
 
-export interface WeatherCardState {
-  city: City;
-  weather: WeatherData | null;
-  loading: boolean;
-  error: string | null;
+export interface GeocodeResult {
+  name: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  country_code: string;
 }
 ```
+
+### State Management
+
+Global state lives in `App.tsx` and is passed via props / context:
+
+| State Slice       | Type        | Location         | Description                                  |
+|-------------------|-------------|------------------|----------------------------------------------|
+| `cities`          | `City[]`    | `App.tsx`        | Master list of saved cities                  |
+| `weatherMap`      | `Map<number, WeatherData>` | `App.tsx` | Weather keyed by city ID               |
+| `isSearchOpen`    | `boolean`   | `Sidebar.tsx`    | Controls search input visibility             |
+| `searchQuery`     | `string`    | `CitySearchInput` | Current debounced search string             |
+| `geocodeResults`  | `GeocodeResult[]` | `CitySearchInput` | Current autocomplete results           |
+| `contextMenu`     | `{cityId, x, y} \| null` | `CityTree.tsx` | Right-click context menu state    |
+| `removingCityIds` | `Set<number>` | `App.tsx`      | IDs currently animating out                  |
 
 ---
 
@@ -468,80 +475,77 @@ export interface WeatherCardState {
 ### Page Load
 ```
 App mounts
-  → useCities() → GET /api/cities
-  → for each city: useWeather(lat, lon) → GET /api/weather/{lat}/{lon}
-  → WeatherCardGrid renders cards; CityTree renders sidebar items
+  → useCities.fetchAll() → GET /api/cities
+  → for each city: useWeather.fetch(lat, lon) → GET /api/weather/{lat}/{lon}
+  → render CityTree + WeatherCardGrid
 ```
 
 ### Add City
 ```
-User types in CitySearch (≥3 chars, 300ms debounce)
-  → useGeocode() → GET /api/geocode?q={query}
-  → CitySearchDropdown renders results
+User types (≥3 chars, 300ms debounce)
+  → useGeocode → GET /api/geocode?q={query}
+  → dropdown renders GeocodeResult[]
 User clicks result
-  → useAddCity() → POST /api/cities
-  → optimistic update: city added to local state
-  → new useWeather() subscription created
-  → CitySearch closes
+  → useCities.add(result) → POST /api/cities
+  → city added to cities[] state
+  → useWeather.fetch(lat, lon) → GET /api/weather/{lat}/{lon}
+  → WeatherCard animates in (fade + slide-up, CSS transition)
 ```
 
 ### Remove City
 ```
-User clicks × on WeatherCard OR right-click → Remove in CityTreeItem
-  → useRemoveCity(id) → DELETE /api/cities/{id}
-  → optimistic update: city removed from local state
-  → WeatherCard animates out (fade + slide down, 200ms)
-  → CityTreeItem simultaneously removed
+User clicks × on card OR right-click → Remove
+  → city ID added to removingCityIds (triggers exit animation, 200ms)
+  → after 200ms: useCities.remove(id) → DELETE /api/cities/{id}
+  → city removed from cities[] state
+  → WeatherCard + CityTreeItem disappear simultaneously
 ```
 
 ### Auto-Refresh
 ```
 useAutoRefresh(60_000)
-  → fires every 60 seconds
-  → invalidates weather query cache for all active cities
-  → each useWeather() re-fetches from GET /api/weather/{lat}/{lon}
-  → cards update in place (no layout shift)
+  → every 60s: for each city in cities[]
+    → GET /api/weather/{lat}/{lon}
+    → weatherMap updated → WeatherCard re-renders with new data
 ```
 
 ---
 
 ## Deployment (Render)
 
-### `render.yaml` Services
-
+### `render.yaml`
 ```yaml
 services:
   - type: web
     name: weather-backend
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: weather-postgres
+          name: weather-db
           property: connectionString
-      - key: ALLOWED_ORIGINS
-        value: "https://weather-frontend.onrender.com"
 
   - type: web
     name: weather-frontend
-    runtime: docker
-    dockerfilePath: ./frontend/Dockerfile
+    env: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
     envVars:
       - key: VITE_API_URL
-        value: "https://weather-backend.onrender.com"
+        value: https://weather-backend.onrender.com
 
 databases:
-  - name: weather-postgres
-    databaseName: weather_db
-    user: weather_user
+  - name: weather-db
+    databaseName: weatherdb
+    user: weather
     plan: free
 ```
 
-### Production Checklist
-- [ ] `DATABASE_URL` injected by Render managed PostgreSQL
-- [ ] `VITE_API_URL` points to backend Render URL
-- [ ] `ALLOWED_ORIGINS` includes frontend Render URL
-- [ ] Uvicorn started without `--reload`
-- [ ] Backend runs as non-root `appuser`
-- [ ] Frontend served via `nginx` or `vite preview`
+### Production Notes
+- Backend Dockerfile uses non-root user (`app`) — Render-compatible.
+- No `--reload` flag in production CMD.
+- `DATABASE_URL` injected by Render from managed Postgres; never hardcoded.
+- Frontend built as static files via `npm run build` → served by Render's CDN.
+- CORS configured in FastAPI to allow the Render frontend domain.
