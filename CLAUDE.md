@@ -1,116 +1,74 @@
 # CLAUDE.md — Weather Dashboard: Real-time City Weather Tracker
 
-## Environment Configuration (.env)
-
-All runtime config is supplied via environment variables that Docker Compose
-loads from a gitignored `.env` file. `.env.example` is the committed, documented
-template.
-
-**One-step local setup:**
-```bash
-cp .env.example .env
-docker compose up --build
-```
-
-| Variable            | Service  | Notes                                                    |
-|---------------------|----------|----------------------------------------------------------|
-| `POSTGRES_USER/PASSWORD/DB` | db | Initialise the local Postgres container.            |
-| `DATABASE_URL`      | backend  | **Required, no fallback** — backend raises if unset.     |
-| `CORS_ORIGINS`      | backend  | Comma-separated origins; defaults to local frontend, never `"*"`. |
-| `VITE_API_URL`      | frontend | Backend base URL, baked in at build time.                |
-
-Conventions (see `DECISIONS.md`):
-- `database.py` reads `DATABASE_URL` from the env with **no hardcoded fallback** —
-  it fails fast with a clear error so misconfiguration is caught at startup.
-- CORS origins come from `CORS_ORIGINS`; wildcard `"*"` is never combined with
-  `allow_credentials=True`.
-- Backend CMD binds to `${PORT:-8000}` so the same image runs on Render.
-- Base images and Python deps are pinned for reproducible builds.
-- On startup the backend retries the schema-creation DB connection a bounded
-  number of times before failing fast, so the first-boot Postgres readiness race
-  doesn't turn into a `restart: unless-stopped` crash loop that blocks
-  `docker compose exec`. The db healthcheck also sets a `start_period`.
-
 ## How to Run
 
-### Start the Full Stack
+### Start the full stack (first time or after changes)
 ```bash
-# Build images and start all services (db, backend, frontend)
 docker compose up --build
-
-# Run in detached mode
-docker compose up --build -d
-
-# View logs (all services)
-docker compose logs -f
-
-# View logs (specific service)
-docker compose logs -f backend
-docker compose logs -f frontend
 ```
 
-### Service URLs (local dev)
-| Service  | URL                          |
-|----------|------------------------------|
-| Frontend | http://localhost:5173        |
-| Backend  | http://localhost:8000        |
-| API Docs | http://localhost:8000/docs   |
-| Health   | http://localhost:8000/health |
-
-### Stop / Teardown
+### Start without rebuilding
 ```bash
-# Stop services (preserve volumes)
-docker compose down
+docker compose up
+```
 
-# Stop and delete database volume (full reset)
+### Stop all services
+```bash
+docker compose down
+```
+
+### Stop and remove volumes (wipe the database)
+```bash
 docker compose down -v
 ```
+
+### Access the running services
+| Service  | URL                        |
+|----------|----------------------------|
+| Frontend | http://localhost:5173       |
+| Backend  | http://localhost:8000       |
+| API Docs | http://localhost:8000/docs  |
+| DB       | localhost:5432              |
 
 ---
 
 ## How to Test
 
-> ⚠️ All tests run **inside Docker containers**. No local Python or Node installation required.
+> ⚠️ All tests run **inside Docker containers**. Do not run `pytest` or `vitest` on the host machine.
 
-### Backend Tests (pytest)
+### Backend tests (pytest)
 ```bash
-# Run full pytest suite
 docker compose exec backend pytest
+```
 
-# Run with verbose output
-docker compose exec backend pytest -v
+With verbosity and coverage:
+```bash
+docker compose exec backend pytest -v --tb=short
+```
 
-# Run a specific test file
+Run a single test file:
+```bash
 docker compose exec backend pytest tests/test_cities.py -v
-
-# Run a specific test
-docker compose exec backend pytest tests/test_cities.py::test_add_city -v
-
-# Run with coverage report
-docker compose exec backend pytest --cov=. --cov-report=term-missing
 ```
 
-### Frontend Tests (Vitest + React Testing Library)
+### Frontend tests (Vitest + React Testing Library)
 ```bash
-# Run full Vitest suite (single run, no watch)
 docker compose exec frontend npx vitest run
+```
 
-# Run with verbose output
+With verbose output:
+```bash
 docker compose exec frontend npx vitest run --reporter=verbose
-
-# Run a specific test file
-docker compose exec frontend npx vitest run src/components/weather/WeatherCard.test.tsx
-
-# Run with coverage
-docker compose exec frontend npx vitest run --coverage
 ```
 
-### Running Tests Against a Fresh Stack
+Run a single test file:
 ```bash
-# Ensure stack is running before exec commands
-docker compose up --build -d
-docker compose exec backend pytest
-docker compose exec frontend npx vitest run
+docker compose exec frontend npx vitest run src/api/client.test.ts
+```
+
+Watch mode (for development inside the container):
+```bash
+docker compose exec frontend npx vitest
 ```
 
 ---
@@ -119,91 +77,81 @@ docker compose exec frontend npx vitest run
 
 ```
 weather-dashboard/
-├── docker-compose.yml          # Orchestrates db, backend, frontend services
-├── render.yaml                 # Render deployment config
+├── docker-compose.yml
+├── render.yaml
 ├── README.md
 ├── ARCHITECTURE.md
 ├── CLAUDE.md
 │
 ├── backend/
-│   ├── Dockerfile              # Single-stage: python:3.12-slim, non-root user
-│   ├── .dockerignore           # Excludes __pycache__/.pytest_cache from COPY
-│   ├── requirements.txt        # fastapi, uvicorn, sqlalchemy, psycopg2-binary,
-│   │                           #   httpx, pydantic, pytest, pytest-cov, httpx (test client)
-│   ├── main.py                 # FastAPI app factory, CORS, router includes, DB init
-│   ├── database.py             # SQLAlchemy engine, SessionLocal, Base
-│   ├── models.py               # City ORM model
-│   ├── schemas.py              # Pydantic request/response schemas
-│   ├── routers/
-│   │   ├── cities.py           # GET/POST /api/cities, DELETE /api/cities/{id}
-│   │   ├── weather.py          # GET /api/weather/{latitude}/{longitude}
-│   │   └── geocode.py          # GET /api/geocode?q=
+│   ├── Dockerfile                # Single-stage, python:3.12-slim, non-root user
+│   ├── requirements.txt
+│   ├── app/
+│   │   ├── main.py               # FastAPI app, lifespan startup, router mounts
+│   │   ├── database.py           # SQLAlchemy engine + SessionLocal + Base
+│   │   ├── models.py             # City ORM model
+│   │   ├── schemas.py            # Pydantic v2 schemas (CityCreate, CityResponse, etc.)
+│   │   ├── routers/
+│   │   │   ├── cities.py         # /api/cities CRUD
+│   │   │   ├── weather.py        # /api/weather/{lat}/{lon}
+│   │   │   └── geocode.py        # /api/geocode
+│   │   └── services/
+│   │       ├── weather.py        # Open-Meteo fetch + WMO code → condition mapping
+│   │       └── geocode.py        # Open-Meteo Geocoding fetch
 │   └── tests/
-│       ├── conftest.py         # pytest fixtures: test DB, test client (TestClient)
-│       ├── test_health.py      # Tests: GET /health → 200
-│       ├── test_cities.py      # Tests: list, add, add duplicate, delete, delete 404
-│       ├── test_weather.py     # Tests: valid coords (mocked httpx), bad gateway
-│       └── test_geocode.py     # Tests: valid query, short query 400, proxied results
+│       ├── conftest.py           # Fixtures: in-memory SQLite test DB, TestClient
+│       ├── test_health.py
+│       ├── test_cities.py
+│       ├── test_weather.py
+│       └── test_geocode.py
 │
 └── frontend/
-    ├── Dockerfile              # Single-stage: node:20-alpine, npm ci, vite --host
-    ├── .dockerignore           # Excludes node_modules/build artifacts from COPY
-    ├── package.json            # react, react-dom, axios, tailwindcss, vite,
-    │                           #   vitest, @testing-library/react, @testing-library/user-event
-    ├── package-lock.json       # Committed lockfile; install via `npm ci`
-    ├── vite.config.ts          # Vite config: React plugin, test config (jsdom)
-    ├── tailwind.config.ts      # Tailwind content paths
-    ├── tsconfig.json           # TypeScript strict mode
-    ├── index.html              # Vite HTML entry point
+    ├── Dockerfile                # Single-stage, node:20-alpine, Vite dev server
+    ├── package.json
+    ├── package-lock.json
+    ├── vite.config.ts            # Proxy /api → backend:8000 in dev
+    ├── tailwind.config.ts
+    ├── tsconfig.json
+    ├── index.html
     └── src/
-        ├── main.tsx            # ReactDOM.createRoot, renders <App />
-        ├── App.tsx             # Root layout, global state, useCities hook
-        ├── types/
-        │   └── index.ts        # City, WeatherData, GeocodeResult interfaces
+        ├── main.tsx
+        ├── App.tsx
+        ├── context/
+        │   └── AppContext.tsx     # cities[], weatherMap, dispatch actions
         ├── api/
-        │   ├── client.ts       # Axios instance: baseURL = import.meta.env.VITE_API_URL
-        │   ├── cities.ts       # getCities(), addCity(), deleteCity()
-        │   ├── weather.ts      # getWeather(lat, lon)
-        │   └── geocode.ts      # searchCities(query)
+        │   └── client.ts         # Typed fetch wrappers for all 6 endpoints
         ├── hooks/
-        │   ├── useCities.ts    # Manages cities[] state + CRUD API calls
-        │   ├── useWeather.ts   # Fetches weather for one city, loading/error state
-        │   ├── useGeocode.ts   # Debounced search (300ms) → GeocodeResult[]
-        │   └── useAutoRefresh.ts # setInterval-based refresh trigger
+        │   ├── useCities.ts      # load, add, remove city
+        │   ├── useWeather.ts     # fetch weather + 60s auto-refresh via setInterval
+        │   └── useGeocode.ts     # debounced (300ms) geocode search
         ├── components/
         │   ├── layout/
+        │   │   ├── Layout.tsx
         │   │   ├── Sidebar.tsx
         │   │   └── MainContent.tsx
         │   ├── sidebar/
-        │   │   ├── CityTree.tsx
+        │   │   ├── AddCityButton.tsx
+        │   │   ├── CitySearch.tsx
+        │   │   ├── SearchInput.tsx
+        │   │   ├── SearchDropdown.tsx
+        │   │   ├── SearchResultItem.tsx
+        │   │   ├── CityTreeView.tsx
         │   │   ├── CityTreeItem.tsx
         │   │   ├── ContextMenu.tsx
-        │   │   ├── AddCityButton.tsx
-        │   │   ├── CitySearchInput.tsx
-        │   │   ├── CitySearchDropdown.tsx
         │   │   └── EmptyState.tsx
-        │   ├── weather/
-        │   │   ├── WeatherCardGrid.tsx
-        │   │   ├── WeatherCard.tsx
-        │   │   ├── WeatherCardSkeleton.tsx
-        │   │   └── WeatherIcon.tsx
-        │   └── common/
-        │       └── ErrorBanner.tsx
-        ├── styles/
-        │   └── index.css       # @tailwind base; @tailwind components; @tailwind utilities;
-        └── tests/
-            ├── setup.ts        # @testing-library/jest-dom/vitest matchers
-            ├── App.test.tsx    # Integration: renders layout, empty state
-            ├── components/
-            │   ├── WeatherCard.test.tsx        # Renders all weather fields
-            │   ├── WeatherCardSkeleton.test.tsx
-            │   ├── CityTreeItem.test.tsx       # Right-click context menu
-            │   ├── CitySearchInput.test.tsx    # Debounce, dropdown, Escape key
-            │   ├── EmptyState.test.tsx
-            │   └── ContextMenu.test.tsx
-            └── hooks/
-                ├── useCities.test.ts           # Add, remove, dedup logic
-                └── useGeocode.test.ts          # Debounce timing (vi.useFakeTimers)
+        │   └── weather/
+        │       ├── WeatherCardGrid.tsx
+        │       ├── WeatherCard.tsx
+        │       ├── WeatherCardSkeleton.tsx
+        │       ├── CardHeader.tsx
+        │       ├── TempDisplay.tsx
+        │       ├── ConditionDisplay.tsx
+        │       ├── WeatherStats.tsx
+        │       └── LastUpdated.tsx
+        ├── types/
+        │   └── index.ts           # City, WeatherData, GeoResult, AppState types
+        └── utils/
+            └── weatherConditions.ts  # WMO code → { condition, emoji } lookup table
 ```
 
 ---
@@ -211,138 +159,98 @@ weather-dashboard/
 ## Key Conventions
 
 ### General
-- **Everything runs in Docker** — never install Python or Node on the host for runtime.
-- **Single-stage Dockerfiles only** — no multi-stage builds. Keep it simple.
-- **Non-root user in backend container** — required by Render; user `app` is created in Dockerfile.
-- **No `--reload` in production CMD** — only use `--reload` locally via `docker compose override` if needed.
-- **Every build context has a `.dockerignore`** — `frontend/.dockerignore` and
-  `backend/.dockerignore` exclude `node_modules` / Python caches so `COPY . .`
-  cannot copy host-built, platform-specific artifacts over the deps installed
-  in the image. (Copying a host `node_modules` was what hung the frontend build
-  — ticket #83.) Keep these in sync when adding new local-only artifacts.
-- **Frontend installs with `npm ci`** against the committed `package-lock.json`
-  for deterministic, reproducible builds — the Dockerfile copies both
-  `package.json` and `package-lock.json` before installing.
+- **No host OS dependencies** — every command runs inside a Docker container.
+- **Single-stage Dockerfiles only** — no multi-stage builds.
+- The backend non-root user (`appuser`) is created in the Dockerfile for security.
+- The database schema is created automatically at backend startup via `Base.metadata.create_all(bind=engine)` — no manual migration step needed for development.
 
 ### Backend (Python / FastAPI)
 
-#### File & Module Layout
-- `main.py` is the FastAPI app entry point. It calls `Base.metadata.create_all(engine)` on startup.
-- All routers live in `routers/` and are included in `main.py` with their prefix (`/api`).
-- `database.py` exposes: `engine`, `SessionLocal`, `Base`, and a `get_db()` dependency.
-- `schemas.py` uses Pydantic v2 (`model_config = ConfigDict(from_attributes=True)`).
-
-#### Coding Standards
-- All route functions use `Depends(get_db)` for DB sessions — never instantiate `SessionLocal` directly in route handlers.
-- External HTTP calls (Open-Meteo) use `httpx.AsyncClient` with a 10-second timeout.
-- Return `HTTPException(status_code=404)` for missing resources, `502` for upstream failures.
-- Duplicate city handling: catch `IntegrityError` on `UNIQUE(name, country)` violation → return existing record with `200`.
-
-#### Testing Conventions
-- `tests/conftest.py` creates an **in-memory SQLite DB** for tests (overrides `get_db` dependency).
-- External API calls (Open-Meteo) are mocked using `pytest-mock` / `httpx` mock transports — tests never make real network calls.
-- Test files are named `test_*.py`; test functions `test_*`.
-- Each test file focuses on one router module.
-
-#### `requirements.txt` (key packages)
-```
-fastapi>=0.111.0
-uvicorn[standard]>=0.29.0
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.9
-httpx>=0.27.0
-pydantic>=2.0.0
-pytest>=8.0.0
-pytest-cov>=5.0.0
-pytest-mock>=3.14.0
-```
+- **Python version:** 3.12 (matches `python:3.12-slim` base image).
+- **Framework:** FastAPI with Pydantic v2 schemas.
+- **ORM:** SQLAlchemy 2.x with synchronous sessions (no async ORM).
+- **Dependency injection:** Database sessions provided via `Depends(get_db)` in all routers.
+- **Router prefix:** All feature routers are mounted under `/api` prefix in `main.py`.
+- **External HTTP calls:** Use `httpx` (sync client) inside services for Open-Meteo API calls.
+- **Error handling:** Return `HTTPException` with appropriate status codes (404, 400, 502).
+- **Duplicate city guard:** `POST /api/cities` catches `IntegrityError` on the unique constraint and returns the existing row with `200 OK` instead of `201 Created`.
+- **Environment:** `DATABASE_URL` is read from `os.environ` (never hardcoded).
+- **Test database:** `conftest.py` overrides `get_db` dependency with an in-memory SQLite session so tests never touch PostgreSQL.
+- **WMO weather codes:** Mapped to human-readable conditions and emoji in `utils/weatherConditions.py` (shared logic between weather service and response schema).
 
 ### Frontend (React / TypeScript / Vite)
 
-#### Coding Standards
-- **TypeScript strict mode** is enabled (`"strict": true` in `tsconfig.json`).
-- All components are **function components** with explicit return type annotations where helpful.
-- No `any` types — use `unknown` + type guards if type is genuinely unknown.
-- Props interfaces are defined inline (`interface Props { ... }`) at the top of each component file.
-- Hooks follow the naming convention `use*` and live in `src/hooks/`.
+- **TypeScript strict mode** is enabled in `tsconfig.json`.
+- **API base URL:** Always read from `import.meta.env.VITE_API_URL` — never hardcoded.
+- **Vite dev proxy:** `vite.config.ts` proxies `/api` → `http://backend:8000` so the frontend container can reach the backend container by Docker service name.
+- **Global state:** Managed via a single React Context (`AppContext`) with `useReducer`. No external state library.
+- **Auto-refresh:** `useWeather` hook sets up a `setInterval` (60 000 ms) that re-fetches weather for all cities in parallel using `Promise.all`. Interval is cleared on unmount.
+- **Debounce:** `useGeocode` hook debounces the geocoding API call by 300 ms using `setTimeout`/`clearTimeout`. The API is called only when input is ≥ 3 characters.
+- **Duplicate guard (frontend):** Before calling `POST /api/cities`, check if a city with the same `latitude`/`longitude` already exists in local state and silently skip.
+- **Animations:**
+  - Card enter: Tailwind CSS classes `opacity-0 translate-y-2` → `opacity-100 translate-y-0` with `transition-all duration-300`.
+  - Card exit: `opacity-100` → `opacity-0 -translate-y-2` with `transition-all duration-200`, then remove from DOM.
+- **Context menu:** Rendered via a fixed-position `div` on `contextmenu` event; dismissed on `click` or `Escape` anywhere in document.
+- **Styling:** Tailwind CSS utility classes only — no custom CSS files except `index.css` (Tailwind directives + base reset).
+- **Component naming:** PascalCase for components, camelCase for hooks (`useCities`, `useWeather`), camelCase for utility functions.
+- **Test files:** Co-located with source files using the `*.test.ts` / `*.test.tsx` naming convention.
+- **Vitest config:** In `vite.config.ts` under the `test` key; uses `jsdom` environment and `@testing-library/jest-dom` setup file.
 
-#### API Layer
-- All backend calls go through `src/api/client.ts` (Axios instance).
-- Never call `fetch()` or `axios` directly in components — always use the typed functions in `src/api/`.
-- `VITE_API_URL` is accessed via `import.meta.env.VITE_API_URL`. This is baked in at build time.
+### API Client (`src/api/client.ts`)
 
-#### Styling
-- **Tailwind CSS utility classes only** — no custom CSS except in `index.css` for Tailwind directives.
-- Responsive grid breakpoints: `grid-cols-1 md:grid-cols-2 lg:grid-cols-3`.
-- Animation classes for card enter: `animate-fade-slide-up` (defined in `tailwind.config.ts` as a custom keyframe).
-- Animation classes for card exit: `animate-fade-slide-down` applied when city ID is in `removingCityIds`.
+All backend calls are centralized here as typed async functions:
 
-#### State Management
-- **No Redux / Zustand** — state is managed with `useState` and `useReducer` in `App.tsx` and passed via props.
-- If prop drilling becomes deeper than 3 levels, use React Context (e.g., for `removeCity` callback).
-- `weatherMap` is a `Map<number, WeatherData>` stored in state — use `new Map(prev).set(...)` pattern for immutable updates.
-
-#### Testing Conventions
-- Test files colocated under `src/tests/` mirroring the component/hook structure.
-- `src/tests/setup.ts` is referenced in `vite.config.ts` under `test.setupFiles`.
-- All API calls are mocked using `vi.mock('../../api/cities')` etc. — no real HTTP in tests.
-- Use `@testing-library/user-event` for simulating user interactions (typing, clicking, right-clicking).
-- Use `vi.useFakeTimers()` for testing debounce in `useGeocode` and auto-refresh in `useAutoRefresh`.
-- Prefer `findBy*` queries (async) over `getBy*` when testing async state updates.
-
-#### `package.json` (key dependencies)
-```json
-{
-  "dependencies": {
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "axios": "^1.7.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.4.0",
-    "vite": "^5.2.0",
-    "@vitejs/plugin-react": "^4.3.0",
-    "tailwindcss": "^3.4.0",
-    "autoprefixer": "^10.4.0",
-    "postcss": "^8.4.0",
-    "vitest": "^1.6.0",
-    "jsdom": "^24.0.0",
-    "@testing-library/react": "^16.0.0",
-    "@testing-library/user-event": "^14.5.0",
-    "@testing-library/jest-dom": "^6.4.0"
-  }
-}
-```
-
-#### `vite.config.ts` (test configuration)
 ```typescript
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: 'jsdom',
-    setupFiles: ['./src/tests/setup.ts'],
-    globals: true,
-  },
-})
+// Example shapes
+getCities(): Promise<City[]>
+addCity(payload: CityCreate): Promise<City>
+deleteCity(id: number): Promise<void>
+getWeather(lat: number, lon: number): Promise<WeatherData>
+geocode(query: string): Promise<GeoResult[]>
 ```
 
-### Git Conventions
-- Branch naming: `milestone/{number}-{short-description}` (e.g., `milestone/1-scaffold`)
-- Commit messages: imperative mood, e.g. `Add DELETE /api/cities/{id} endpoint`
-- `docker-compose.yml`, `render.yaml`, both `Dockerfile`s, and `ARCHITECTURE.md` are always committed.
-- Never commit `.env` files — use `docker-compose.yml` env vars for local dev.
+Throws a typed `ApiError` (with `status` and `message`) on non-2xx responses so callers can handle errors uniformly.
 
-### Milestone Development Order
-Each milestone is self-contained and leaves the app in a working state:
+### Milestone Checklist (for tracking progress)
 
-| Milestone | Focus                        | Definition of Done                                      |
-|-----------|------------------------------|---------------------------------------------------------|
-| 1         | Infrastructure & Scaffold    | `docker compose up` → health check passes, DB schema created, test harnesses run |
-| 2         | Backend API                  | All 6 endpoints pass pytest; correct status codes       |
-| 3         | Frontend Shell               | Two-panel layout renders; API data flows in; empty state visible |
-| 4         | Add City Feature             | Search → autocomplete → add → persists in DB + UI       |
-| 5         | Remove City Feature          | × button + right-click remove → simultaneous UI update + DB delete + animation |
-| 6         | Polish                       | Auto-refresh (60s), page-reload persistence, responsive at 375/768/1440px |
+| # | Milestone                                      | Key Deliverables                                                       |
+|---|------------------------------------------------|------------------------------------------------------------------------|
+| 1 | Infrastructure & Project Scaffold              | `docker compose up --build` green, `/health` responds, DB schema up    |
+| 2 | Backend API — All Endpoints Implemented        | All 6 endpoints pass pytest inside container                           |
+| 3 | Frontend Shell — Layout & API Integration      | Two-panel layout renders, API client layer tested with Vitest          |
+| 4 | City Tree View — Sidebar Add & Remove          | Typeahead search, tree view with flags + temps, right-click remove     |
+| 5 | Weather Cards — Full Data & Interactions       | All data fields, skeletons, animations, × remove button                |
+| 6 | Polish, Persistence & Deployment Readiness     | Persists on refresh, Render deploy works, full test suite green        |
+
+### Common Development Commands
+
+```bash
+# Rebuild only the backend after Python changes
+docker compose up --build backend
+
+# Rebuild only the frontend after dependency changes
+docker compose up --build frontend
+
+# Tail logs from all services
+docker compose logs -f
+
+# Tail logs from backend only
+docker compose logs -f backend
+
+# Open a shell in the backend container
+docker compose exec backend bash
+
+# Open a shell in the frontend container
+docker compose exec frontend sh
+
+# Run a one-off database query
+docker compose exec db psql -U weather -d weatherdb -c "SELECT * FROM cities;"
+
+# Install a new Python dependency (then rebuild)
+docker compose exec backend pip install <package>
+# → add to requirements.txt, then: docker compose up --build backend
+
+# Install a new npm dependency (then rebuild)
+docker compose exec frontend npm install <package>
+# → package.json is updated; docker compose up --build frontend to persist
+```
